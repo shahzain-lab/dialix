@@ -12,9 +12,8 @@ async function main() {
   if (!url) {
     throw new Error("DATABASE_URL is required");
   }
-  const sql = postgres(url, { max: 1 });
+  const sql = postgres(url, { max: 1, onnotice: () => {} });
   await sql.file(sqlPath);
-  await sql.end({ timeout: 5 });
   console.log("Dialix database migrated.");
   process.exit(0);
 }
