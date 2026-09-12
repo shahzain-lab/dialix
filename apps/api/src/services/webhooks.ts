@@ -29,7 +29,7 @@ export async function ensureCartesiaWebhook(apiKey?: string) {
 
 export async function attachWebhookToAgents(webhookId: string, apiKey?: string) {
   const listed = await cartesia.listAgents(apiKey).catch(() => ({ data: [] as Array<{ id: string }> }));
-  const agents = Array.isArray(listed) ? listed : (listed.data ?? listed.agents ?? []);
+  const agents = listed.data ?? [];
   for (const agent of agents) {
     if (!agent?.id) continue;
     await cartesia.updateAgent(agent.id, { webhook_id: webhookId }, apiKey).catch(() => undefined);

@@ -294,8 +294,14 @@ export const cartesia = {
   listWebhooks(apiKey?: string) {
     return cartesiaFetch<{ data?: Array<{ id: string; url: string; display_name?: string | null }> }>("/agents/webhooks?limit=100", {}, apiKey);
   },
-  listAgents(apiKey?: string) {
-    return cartesiaFetch<{ data?: Array<{ id: string; name?: string }>; agents?: Array<{ id: string }> } | Array<{ id: string }>>("/v1/agents", {}, apiKey);
+  async listAgents(apiKey?: string) {
+    const listed = await cartesiaFetch<{ data?: Array<{ id: string; name?: string }>; agents?: Array<{ id: string }> } | Array<{ id: string }>>(
+      "/v1/agents",
+      {},
+      apiKey,
+    );
+    const data = Array.isArray(listed) ? listed : (listed.data ?? listed.agents ?? []);
+    return { data };
   },
   createTool(body: Record<string, unknown>, apiKey?: string) {
     return cartesiaFetch<{ id: string }>("/v1/agents/tools", {
