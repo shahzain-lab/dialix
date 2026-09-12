@@ -7,4 +7,4 @@ RUN pnpm build
 ENV NODE_ENV=production
 ENV PORT=3001
 EXPOSE 3001
-CMD ["sh", "-c", "pnpm db:migrate && pnpm --filter @dialix/api start"]
+CMD ["sh", "-c", "node packages/db/dist/migrate.js && node apps/api/dist/index.js"]
