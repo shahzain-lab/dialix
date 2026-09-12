@@ -3,7 +3,7 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile=false
-RUN pnpm build
+RUN pnpm build && node scripts/use-dist-exports.mjs
 ENV NODE_ENV=production
 ENV PORT=3001
 EXPOSE 3001
