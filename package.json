@@ -1,0 +1,16 @@
+{
+  "name": "dialix",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @dialix/web --filter @dialix/api --filter @dialix/worker dev",
+    "dev:web": "pnpm --filter @dialix/web dev",
+    "dev:api": "pnpm --filter @dialix/api dev",
+    "dev:worker": "pnpm --filter @dialix/worker dev",
+    "build": "pnpm --filter @dialix/shared build && pnpm --filter @dialix/db build && pnpm --filter @dialix/api build && pnpm --filter @dialix/web build",
+    "db:generate": "pnpm --filter @dialix/db generate",
+    "db:migrate": "pnpm --filter @dialix/db migrate",
+    "db:studio": "pnpm --filter @dialix/db studio",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

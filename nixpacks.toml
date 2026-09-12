@@ -1,0 +1,4 @@
+providers:
+  nodejs:
+    nodejs:
+      version: "22"
