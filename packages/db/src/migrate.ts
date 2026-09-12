@@ -14,8 +14,9 @@ async function main() {
   }
   const sql = postgres(url, { max: 1 });
   await sql.file(sqlPath);
-  await sql.end();
+  await sql.end({ timeout: 5 });
   console.log("Dialix database migrated.");
+  process.exit(0);
 }
 
 main().catch((err) => {
