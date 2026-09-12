@@ -131,18 +131,21 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
     return db.select().from(kbDocuments).where(eq(kbDocuments.organizationId, org.organizationId));
   });
 
-  app.post("/api/v1/knowledge/documents", async (req, reply) => {
-    const org = await withOrg(req);
-    assertWrite(org.role);
-    const body = req.body as { folderId: string; name: string; content: string; metadata?: Record<string, unknown> };
+  async function saveDocument(
+    org: Awaited<ReturnType<typeof withOrg>>,
+    body: { folderId: string; name: string; content: string; metadata?: Record<string, unknown> },
+  ) {
     const [folder] = await db
       .select()
       .from(kbFolders)
       .where(and(eq(kbFolders.id, body.folderId), eq(kbFolders.organizationId, org.organizationId)))
       .limit(1);
-    if (!body.name?.trim()) return reply.code(400).send({ error: "Give the document a name." });
-    if (!body.content?.trim()) return reply.code(400).send({ error: "Paste document content before saving. Empty documents cannot be indexed." });
-    if (!folder) return reply.code(404).send({ error: "That knowledge folder is not in this workspace. Create or select a folder first." });
+    if (!body.name?.trim()) throw Object.assign(new Error("Give the document a name."), { statusCode: 400 });
+    if (!body.content?.trim()) throw Object.assign(new Error("Paste document content before saving. Empty documents cannot be indexed."), { statusCode: 400 });
+    if (Buffer.byteLength(body.content, "utf8") > 1_000_000) {
+      throw Object.assign(new Error("Cartesia knowledge documents must be under 1 MB of text."), { statusCode: 413 });
+    }
+    if (!folder) throw Object.assign(new Error("That knowledge folder is not in this workspace. Create or select a folder first."), { statusCode: 404 });
     const apiKey = await orgApiKey(org.organizationId);
     let cartesiaDocumentId: string | null = null;
     if (folder.cartesiaFolderId && (cartesia.configured() || apiKey)) {
@@ -172,7 +175,53 @@ export async function registerKnowledgeRoutes(app: FastifyInstance) {
       })
       .returning();
     await audit(org, "create", "kb_document", row!.id);
-    return reply.code(201).send(row);
+    return row!;
+  }
+
+  app.post("/api/v1/knowledge/documents", async (req, reply) => {
+    const org = await withOrg(req);
+    assertWrite(org.role);
+    try {
+      const row = await saveDocument(org, req.body as { folderId: string; name: string; content: string; metadata?: Record<string, unknown> });
+      return reply.code(201).send(row);
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode ?? 500;
+      return reply.code(status).send({ error: err instanceof Error ? err.message : "Could not save the document." });
+    }
+  });
+
+  app.post("/api/v1/knowledge/documents/upload", async (req, reply) => {
+    const org = await withOrg(req);
+    assertWrite(org.role);
+    const body = req.body as {
+      folderId: string;
+      name?: string;
+      content?: string;
+      files?: Array<{ name: string; text: string }>;
+      sourceType?: string;
+      metadata?: Record<string, string>;
+    };
+    const docs = (body.files?.length ? body.files : body.content ? [{ name: body.name || "Untitled", text: body.content }] : []).filter((doc) => doc.text?.trim());
+    if (!docs.length) return reply.code(400).send({ error: "Provide pasted text or at least one text file (.txt, .md, .csv, .json, .html)." });
+    if (docs.length > 100) return reply.code(400).send({ error: "Cartesia bulk upload accepts at most 100 documents per request." });
+    const metadata = { source: body.sourceType ?? "file", ...(body.metadata ?? {}) };
+    const documents = [];
+    const errors = [];
+    for (const doc of docs) {
+      try {
+        documents.push(
+          await saveDocument(org, {
+            folderId: body.folderId,
+            name: doc.name || body.name || "Untitled",
+            content: doc.text,
+            metadata,
+          }),
+        );
+      } catch (err) {
+        errors.push({ name: doc.name, error: err instanceof Error ? err.message : "Upload failed" });
+      }
+    }
+    return reply.code(documents.length ? 201 : 400).send({ uploaded: documents.length, failed: errors.length, documents, errors });
   });
 
   app.patch("/api/v1/knowledge/documents/:id", async (req, reply) => {

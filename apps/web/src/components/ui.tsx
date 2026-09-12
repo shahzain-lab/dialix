@@ -22,7 +22,7 @@ export function Button({
   return (
     <button
       disabled={disabled || loading}
-      className={cn("inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:opacity-50", styles, className)}
+      className={cn("inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:opacity-50", styles, className)}
       {...props}
     >
       {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
@@ -36,7 +36,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-mist-100 outline-none ring-accent/40 placeholder:text-mist-400 focus:ring-2",
+        "min-h-11 w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-mist-100 outline-none ring-accent/40 placeholder:text-mist-400 focus:ring-2",
         props.className,
       )}
     />
@@ -60,7 +60,7 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       className={cn(
-        "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-mist-100 outline-none ring-accent/40 focus:ring-2",
+        "min-h-11 w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-mist-100 outline-none ring-accent/40 focus:ring-2",
         props.className,
       )}
     />
@@ -220,15 +220,15 @@ export function ConfirmDialog({
 
 export function Stepper({ steps, current, onSelect }: { steps: string[]; current: number; onSelect?: (index: number) => void }) {
   return (
-    <ol className="mb-6 flex flex-wrap gap-2">
+    <ol className="mb-6 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {steps.map((step, i) => (
-        <li key={step}>
+        <li key={step} className="shrink-0">
           <button
             type="button"
             onClick={() => onSelect?.(i)}
             disabled={!onSelect || i > current}
             className={cn(
-              "flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium",
+              "flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium",
               i === current ? "bg-accent text-ink-950" : i < current ? "bg-emerald-500/20 text-emerald-200" : "bg-ink-700 text-mist-400",
               onSelect && i <= current ? "cursor-pointer" : "cursor-default",
             )}

@@ -21,11 +21,15 @@ export const agentConfigSchema = z.object({
   initialMessage: z.string().max(1000).optional().nullable(),
   modelId: z.string().min(1).default("gpt-5.4-mini"),
   temperature: z.number().min(0).max(1).optional().nullable(),
+  maxOutputTokens: z.number().int().min(1).max(4096).optional().nullable(),
   language: z.string().min(2).max(8).default("en"),
   voiceId: z.string().min(1),
   speed: z.number().min(0.6).max(1.5).optional().nullable(),
   volume: z.number().min(0.5).max(2).optional().nullable(),
   emotion: z.string().optional().nullable(),
+  waitForCaller: z.boolean().optional().default(false),
+  enableEndCall: z.boolean().optional().default(true),
+  enableDtmf: z.boolean().optional().default(false),
   noiseSuppression: z.enum(["off", "auto", "max"]).default("auto"),
   keyterms: z.array(z.string()).default([]),
   maxCallDurationMinutes: z.number().int().min(1).max(60).default(10),
@@ -62,6 +66,9 @@ export const campaignSchema = z.object({
   contactIds: z.array(z.string().uuid()).optional(),
   targetConcurrency: z.number().int().min(1).max(50).default(5),
   scheduledAt: z.string().datetime().optional().nullable(),
+  region: z.enum(["US"]).optional().default("US"),
+  ringingTimeoutSeconds: z.number().int().min(5).max(120).optional().nullable(),
+  maxCallDurationMinutes: z.number().int().min(1).max(60).optional().nullable(),
 });
 
 export const customCrmConfigSchema = z.object({

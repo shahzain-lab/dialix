@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
-import { campaignSchema } from "@dialix/shared";
+import { campaignSchema, CAMPAIGN_REGIONS } from "@dialix/shared";
 import { agents, campaignRecipients, campaigns, contactListMembers, contacts, organizations, phoneNumbers } from "@dialix/db";
 import { db } from "../db.js";
 import { assertWrite, audit, withOrg } from "../org.js";
@@ -17,7 +17,28 @@ async function orgApiKey(organizationId: string) {
 export async function registerCampaignRoutes(app: FastifyInstance) {
   app.get("/api/v1/campaigns", async (req) => {
     const org = await withOrg(req);
-    return db.select().from(campaigns).where(eq(campaigns.organizationId, org.organizationId));
+    const rows = await db.select().from(campaigns).where(eq(campaigns.organizationId, org.organizationId));
+    const withCounts = [];
+    for (const campaign of rows) {
+      const recipients = await db.select().from(campaignRecipients).where(eq(campaignRecipients.campaignId, campaign.id));
+      withCounts.push({
+        ...campaign,
+        recipientCount: recipients.length,
+        consentedCount: recipients.filter((r) => r.status !== "blocked_no_consent").length,
+      });
+    }
+    return withCounts;
+  });
+
+  app.get("/api/v1/campaigns/options", async (req) => {
+    await withOrg(req);
+    return {
+      regions: CAMPAIGN_REGIONS,
+      concurrency: { min: 1, max: 50, default: 5 },
+      ringingTimeoutSeconds: { min: 5, max: 120, default: 30 },
+      maxCallDurationMinutes: { min: 1, max: 60, default: 10 },
+      actions: ["create", "schedule", "start", "retry", "cancel"],
+    };
   });
 
   app.get("/api/v1/campaigns/:id", async (req, reply) => {
@@ -30,7 +51,12 @@ export async function registerCampaignRoutes(app: FastifyInstance) {
       .limit(1);
     if (!campaign) return reply.code(404).send({ error: `Campaign ${id} was not found in this workspace.` });
     const recipients = await db.select().from(campaignRecipients).where(eq(campaignRecipients.campaignId, id));
-    return { ...campaign, recipients };
+    const apiKey = await orgApiKey(org.organizationId);
+    let batch: unknown = null;
+    if (campaign.cartesiaBatchId && (cartesia.configured() || apiKey)) {
+      batch = await cartesia.getCallBatch(campaign.cartesiaBatchId, apiKey).catch(() => null);
+    }
+    return { ...campaign, recipients, batch };
   });
 
   app.post("/api/v1/campaigns", async (req, reply) => {
@@ -60,6 +86,11 @@ export async function registerCampaignRoutes(app: FastifyInstance) {
         status: parsed.scheduledAt ? "scheduled" : "draft",
         targetConcurrency: parsed.targetConcurrency,
         scheduledAt: parsed.scheduledAt ? new Date(parsed.scheduledAt) : null,
+        settings: {
+          region: parsed.region ?? "US",
+          ringingTimeoutSeconds: parsed.ringingTimeoutSeconds ?? null,
+          maxCallDurationMinutes: parsed.maxCallDurationMinutes ?? null,
+        },
       })
       .returning();
     let contactRows = [] as typeof contacts.$inferSelect[];
@@ -125,17 +156,22 @@ export async function registerCampaignRoutes(app: FastifyInstance) {
       description: `Campaign ${campaign.name} reservation`,
     });
     const apiKey = await orgApiKey(org.organizationId);
-    const batch = await cartesia.createCallBatch({
+    const settings = campaign.settings ?? {};
+    const batchPayload: Record<string, unknown> = {
       name: campaign.name,
       from_number_id: from.cartesiaNumberId,
       agent_id: agent.cartesiaAgentId,
       target_concurrency_limit: campaign.targetConcurrency,
-      scheduled_at: campaign.scheduledAt?.toISOString(),
+      region: settings.region ?? "US",
+      scheduled_at: campaign.scheduledAt && campaign.scheduledAt > new Date() ? campaign.scheduledAt.toISOString() : undefined,
       recipients: allowed.map((r) => ({
         to_number: r.toNumber,
         metadata: { orgId: org.organizationId, campaignId: campaign.id, contactId: r.contactId, dialixCampaignRecipientId: r.id },
       })),
-    }, apiKey);
+    };
+    if (settings.ringingTimeoutSeconds) batchPayload.ringing_timeout_seconds = settings.ringingTimeoutSeconds;
+    if (settings.maxCallDurationMinutes) batchPayload.max_call_duration_minutes = settings.maxCallDurationMinutes;
+    const batch = await cartesia.createCallBatch(batchPayload, apiKey);
     await db.update(campaigns).set({ status: "running", cartesiaBatchId: batch.id, updatedAt: new Date() }).where(eq(campaigns.id, id));
     await audit(org, "start", "campaign", id);
     return { ...campaign, status: "running", cartesiaBatchId: batch.id };

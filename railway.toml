@@ -1,9 +1,10 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 buildCommand = "pnpm install && pnpm build"
 
 [deploy]
-startCommand = "node apps/api/dist/index.js"
+startCommand = "sh -c \"node packages/db/dist/migrate.js && node apps/api/dist/index.js\""
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

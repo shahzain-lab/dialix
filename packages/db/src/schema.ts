@@ -195,6 +195,16 @@ export const agents = pgTable(
       .default([]),
     template: text("template").notNull().default("blank"),
     cartesiaToolIds: jsonb("cartesia_tool_ids").$type<string[]>().notNull().default([]),
+    settings: jsonb("settings")
+      .$type<{
+        temperature?: number | null;
+        maxOutputTokens?: number | null;
+        waitForCaller?: boolean;
+        enableEndCall?: boolean;
+        enableDtmf?: boolean;
+      }>()
+      .notNull()
+      .default({}),
     ...timestamps,
   },
   (t) => [index("agents_org_idx").on(t.organizationId)],
@@ -385,6 +395,14 @@ export const campaigns = pgTable(
     status: campaignStatusEnum("status").notNull().default("draft"),
     targetConcurrency: integer("target_concurrency").notNull().default(5),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    settings: jsonb("settings")
+      .$type<{
+        region?: "US";
+        ringingTimeoutSeconds?: number | null;
+        maxCallDurationMinutes?: number | null;
+      }>()
+      .notNull()
+      .default({}),
     ...timestamps,
   },
   (t) => [index("campaigns_org_idx").on(t.organizationId)],

@@ -21,6 +21,8 @@ const schema = z.object({
   CARTESIA_API_KEY: z.string().optional().default(""),
   CARTESIA_VERSION: z.string().default("2026-08-14"),
   CARTESIA_WEBHOOK_SECRET: z.string().optional().default(""),
+  CARTESIA_WEBHOOK_ID: z.string().optional().default(""),
+  CARTESIA_WEBHOOK_URL: z.string().optional().default(""),
   STRIPE_SECRET_KEY: z.string().optional().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(""),
   STRIPE_PRICE_STARTER: z.string().optional().default(""),

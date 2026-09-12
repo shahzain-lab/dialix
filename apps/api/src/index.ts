@@ -11,6 +11,7 @@ import { ZodError } from "zod";
 import { env, isProd } from "./env.js";
 import { HttpError } from "./http.js";
 import { CartesiaError } from "./integrations/cartesia/client.js";
+import { cartesia } from "./integrations/cartesia/client.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerKnowledgeRoutes } from "./routes/knowledge.js";
@@ -26,6 +27,7 @@ import { registerTeamRoutes } from "./routes/team.js";
 import { registerOverviewRoutes } from "./routes/overview.js";
 import { registerInternalRoutes } from "./routes/internal.js";
 import { startWorker } from "./queue.js";
+import { attachWebhookToAgents, ensureCartesiaWebhook } from "./services/webhooks.js";
 
 const app = Fastify({ logger: true });
 
@@ -111,3 +113,14 @@ try {
 }
 
 await app.listen({ host: env.API_HOST, port: env.API_PORT });
+
+if (cartesia.configured()) {
+  ensureCartesiaWebhook()
+    .then(async (id) => {
+      if (!id) return;
+      app.log.info({ webhookId: id }, "Cartesia call webhook is registered");
+      const attached = await attachWebhookToAgents(id);
+      app.log.info({ attached }, "Attached Dialix webhook to Cartesia agents");
+    })
+    .catch((err) => app.log.warn({ err }, "Could not register the Cartesia webhook"));
+}

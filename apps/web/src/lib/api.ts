@@ -36,7 +36,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       : { error: await res.text() };
     throw new ApiError(data.error || data.message || `Request failed (${res.status}) for ${path}`, res.status, data.details);
   }
-  if (contentType.includes("text/csv") || contentType.includes("octet-stream") || contentType.includes("text/plain")) {
+  if (contentType.includes("audio/") || contentType.includes("text/csv") || contentType.includes("octet-stream") || contentType.includes("text/plain")) {
     return (await res.blob()) as T;
   }
   if (res.status === 204) return undefined as T;
@@ -63,4 +63,13 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function playApiAudio(path: string, init?: RequestInit) {
+  const blob = await api<Blob>(path, init);
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  await audio.play();
+  audio.onended = () => URL.revokeObjectURL(url);
+  return audio;
 }

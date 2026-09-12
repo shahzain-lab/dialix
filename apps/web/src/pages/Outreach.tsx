@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { CAMPAIGN_REGIONS } from "@dialix/shared";
 import { api, downloadBlob } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { errorMessage, useToast } from "../lib/toast";
@@ -123,12 +124,12 @@ export function ContactsPage() {
           emptyDetail="Add a row or import a CSV with a phone column. Consent is required before campaigns can dial."
         >
           {(data ?? []).map((c) => (
-            <Card key={c.id} className="flex items-center justify-between p-4">
+            <Card key={c.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="font-medium">{c.firstName} {c.lastName}</div>
                 <div className="font-mono text-sm text-mist-400">{c.phone}</div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Badge tone={c.consentAt ? "good" : "bad"}>{c.consentAt ? "consented" : "no consent"}</Badge>
                 <Button variant="danger" onClick={() => setDeleteId(c)}>Delete</Button>
               </div>
@@ -214,7 +215,7 @@ export function ListsPage() {
   return (
     <div>
       <PageHeader title="Lists" subtitle="Reusable audiences for outbound batches." />
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
         <Input placeholder="List name" value={name} onChange={(e) => setName(e.target.value)} />
         <Button loading={create.isPending} onClick={() => create.mutate()}>Create</Button>
       </div>
@@ -276,7 +277,30 @@ export function ListsPage() {
   );
 }
 
-const CAMPAIGN_STEPS = ["Audience", "Caller ID", "Review"];
+const CAMPAIGN_STEPS = ["Audience", "Caller ID", "Dialing", "Review"];
+
+type CampaignRow = {
+  id: string;
+  name: string;
+  status: string;
+  targetConcurrency: number;
+  scheduledAt: string | null;
+  recipientCount?: number;
+  consentedCount?: number;
+  settings?: { region?: string; ringingTimeoutSeconds?: number | null; maxCallDurationMinutes?: number | null };
+};
+
+type CampaignDetail = CampaignRow & {
+  recipients?: Array<{ id: string; toNumber: string; status: string; errorMessage?: string | null }>;
+  batch?: {
+    status?: string;
+    total_calls_scheduled?: number;
+    total_calls_dispatched?: number;
+    total_calls_finished?: number;
+    retry_count?: number;
+    recipients?: Array<{ to_number: string; status: string; error_message?: string }>;
+  } | null;
+};
 
 export function CampaignsPage() {
   const qc = useQueryClient();
@@ -284,10 +308,16 @@ export function CampaignsPage() {
   const { org } = useAuth();
   const [step, setStep] = useState(0);
   const [cancelId, setCancelId] = useState<{ id: string; name: string } | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const { data, isPending, error } = useQuery({
     queryKey: ["campaigns", org?.id],
     enabled: Boolean(org),
-    queryFn: () => api<Array<{ id: string; name: string; status: string }>>("/api/v1/campaigns"),
+    queryFn: () => api<CampaignRow[]>("/api/v1/campaigns"),
+  });
+  const { data: detail } = useQuery({
+    queryKey: ["campaign", org?.id, openId],
+    enabled: Boolean(org) && Boolean(openId),
+    queryFn: () => api<CampaignDetail>(`/api/v1/campaigns/${openId}`),
   });
   const { data: agents } = useQuery({
     queryKey: ["agents", org?.id],
@@ -302,19 +332,42 @@ export function CampaignsPage() {
   const { data: lists } = useQuery({
     queryKey: ["lists", org?.id],
     enabled: Boolean(org),
-    queryFn: () => api<Array<{ id: string; name: string }>>("/api/v1/lists"),
+    queryFn: () => api<Array<{ id: string; name: string; memberCount?: number }>>("/api/v1/lists"),
   });
-  const [form, setForm] = useState({ name: "Outreach", agentId: "", fromNumberId: "", listId: "", targetConcurrency: "5" });
+  const [form, setForm] = useState({
+    name: "Outreach",
+    agentId: "",
+    fromNumberId: "",
+    listId: "",
+    targetConcurrency: "5",
+    region: "US",
+    scheduledAt: "",
+    ringingTimeoutSeconds: "30",
+    maxCallDurationMinutes: "10",
+  });
 
   const create = useMutation({
     mutationFn: () => {
       if (!form.name.trim()) throw new Error("Give the campaign a name.");
       if (!form.agentId) throw new Error("Choose an agent for this campaign.");
       if (!form.fromNumberId) throw new Error("Choose a from-number before creating the campaign.");
-      return api("/api/v1/campaigns", { method: "POST", body: JSON.stringify({ ...form, targetConcurrency: Number(form.targetConcurrency) }) });
+      return api("/api/v1/campaigns", {
+        method: "POST",
+        body: JSON.stringify({
+          name: form.name,
+          agentId: form.agentId,
+          fromNumberId: form.fromNumberId,
+          listId: form.listId || null,
+          targetConcurrency: Number(form.targetConcurrency),
+          region: form.region,
+          ringingTimeoutSeconds: Number(form.ringingTimeoutSeconds),
+          maxCallDurationMinutes: Number(form.maxCallDurationMinutes),
+          scheduledAt: form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null,
+        }),
+      });
     },
     onSuccess: async () => {
-      toast.success("Campaign created", `${form.name} is in draft. Recipients without consent will be blocked at start.`);
+      toast.success("Campaign created", `${form.name} is ${form.scheduledAt ? "scheduled" : "in draft"}. Recipients without consent will be blocked at start.`);
       setStep(0);
       await qc.invalidateQueries({ queryKey: ["campaigns"] });
     },
@@ -325,6 +378,7 @@ export function CampaignsPage() {
     onSuccess: async () => {
       toast.success("Campaign started", "Cartesia is dialing consented recipients. Unconsented rows stay blocked.");
       await qc.invalidateQueries({ queryKey: ["campaigns"] });
+      await qc.invalidateQueries({ queryKey: ["campaign"] });
     },
     onError: (err) => toast.error("Could not start the campaign", errorMessage(err, "Confirm consent, credits, and Cartesia provisioning.")),
   });
@@ -345,15 +399,15 @@ export function CampaignsPage() {
 
   const agentName = agents?.find((a) => a.id === form.agentId)?.name ?? "—";
   const fromE164 = numbers?.find((n) => n.id === form.fromNumberId)?.e164 ?? "—";
-  const listName = lists?.find((l) => l.id === form.listId)?.name ?? "No list";
+  const list = lists?.find((l) => l.id === form.listId);
 
   return (
     <div>
-      <PageHeader title="Campaigns" subtitle="Cartesia batch calling. Recipients without consent are blocked." />
-      <Card className="mb-6 p-5">
+      <PageHeader title="Campaigns" subtitle="Cartesia batch calling: audience, caller ID, concurrency, region, schedule, retry, and cancel. Recipients without consent are blocked." />
+      <Card className="mb-6 p-4 sm:p-5">
         <Stepper steps={CAMPAIGN_STEPS} current={step} onSelect={setStep} />
         {step === 0 ? (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Campaign name</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -361,14 +415,19 @@ export function CampaignsPage() {
             <div>
               <Label>Audience list</Label>
               <Select value={form.listId} onChange={(e) => setForm({ ...form, listId: e.target.value })}>
-                <option value="">List</option>
-                {(lists ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                <option value="">No list yet</option>
+                {(lists ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}{l.memberCount != null ? ` · ${l.memberCount}` : ""}</option>)}
               </Select>
+            </div>
+            <div className="sm:col-span-2">
+              <Label>Schedule (optional)</Label>
+              <Input type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} />
+              <p className="mt-1 text-xs text-mist-400">Leave empty to keep as a draft you start manually. Cartesia runs scheduled batches at this time.</p>
             </div>
           </div>
         ) : null}
         {step === 1 ? (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Agent</Label>
               <Select value={form.agentId} onChange={(e) => setForm({ ...form, agentId: e.target.value })}>
@@ -383,24 +442,46 @@ export function CampaignsPage() {
                 {(numbers ?? []).map((n) => <option key={n.id} value={n.id}>{n.e164}</option>)}
               </Select>
             </div>
-            <div>
-              <Label>Target concurrency</Label>
-              <Input type="number" min={1} max={50} value={form.targetConcurrency} onChange={(e) => setForm({ ...form, targetConcurrency: e.target.value })} />
-            </div>
           </div>
         ) : null}
         {step === 2 ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Region</Label>
+              <Select value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
+                {CAMPAIGN_REGIONS.map((region) => (
+                  <option key={region.id} value={region.id}>{region.label}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label>Target concurrency (1–50)</Label>
+              <Input type="number" min={1} max={50} value={form.targetConcurrency} onChange={(e) => setForm({ ...form, targetConcurrency: e.target.value })} />
+            </div>
+            <div>
+              <Label>Ring timeout (seconds)</Label>
+              <Input type="number" min={5} max={120} value={form.ringingTimeoutSeconds} onChange={(e) => setForm({ ...form, ringingTimeoutSeconds: e.target.value })} />
+            </div>
+            <div>
+              <Label>Max call minutes</Label>
+              <Input type="number" min={1} max={60} value={form.maxCallDurationMinutes} onChange={(e) => setForm({ ...form, maxCallDurationMinutes: e.target.value })} />
+            </div>
+          </div>
+        ) : null}
+        {step === 3 ? (
           <div className="space-y-2 text-sm">
             <p><span className="text-mist-400">Name:</span> {form.name}</p>
-            <p><span className="text-mist-400">List:</span> {listName}</p>
+            <p><span className="text-mist-400">List:</span> {list?.name ?? "No list"}{list?.memberCount != null ? ` · ${list.memberCount} contacts` : ""}</p>
             <p><span className="text-mist-400">Agent:</span> {agentName}</p>
             <p><span className="text-mist-400">From:</span> {fromE164}</p>
+            <p><span className="text-mist-400">Dialing:</span> {form.region} · {form.targetConcurrency} concurrent · ring {form.ringingTimeoutSeconds}s · max {form.maxCallDurationMinutes} min</p>
+            <p><span className="text-mist-400">Schedule:</span> {form.scheduledAt ? new Date(form.scheduledAt).toLocaleString() : "Start manually"}</p>
             <p className="text-mist-400">You are responsible for TCPA and Cartesia Acceptable Use. Dialix will not dial contacts without consent.</p>
           </div>
         ) : null}
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           {step > 0 ? <Button variant="outline" onClick={() => setStep((s) => s - 1)}>Back</Button> : null}
-          {step < 2 ? (
+          {step < 3 ? (
             <Button
               onClick={() => {
                 if (step === 0 && !form.name.trim()) {
@@ -430,19 +511,40 @@ export function CampaignsPage() {
         error={error}
         empty={!data?.length}
         emptyTitle="No campaigns yet"
-        emptyDetail="Use the stepper above to name an audience, pick caller ID, then create a draft campaign."
+        emptyDetail="Use the stepper above to name an audience, pick caller ID and dialing options, then create a draft campaign."
       >
         {(data ?? []).map((c) => (
-          <Card key={c.id} className="mb-3 flex items-center justify-between p-4">
-            <div>
-              <div className="font-medium">{c.name}</div>
-              <Badge>{c.status}</Badge>
+          <Card key={c.id} className="mb-3 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button className="text-left" onClick={() => setOpenId(openId === c.id ? null : c.id)}>
+                <div className="font-medium">{c.name}</div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Badge tone={c.status === "running" ? "good" : c.status === "canceled" ? "bad" : "warn"}>{c.status}</Badge>
+                  <Badge>{c.consentedCount ?? 0}/{c.recipientCount ?? 0} consented</Badge>
+                </div>
+              </button>
+              <div className="flex flex-wrap gap-2">
+                <Button loading={start.isPending} onClick={() => start.mutate(c.id)}>Start</Button>
+                <Button variant="outline" loading={retry.isPending} onClick={() => retry.mutate(c.id)}>Retry</Button>
+                <Button variant="danger" onClick={() => setCancelId({ id: c.id, name: c.name })}>Cancel</Button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Button loading={start.isPending} onClick={() => start.mutate(c.id)}>Start</Button>
-              <Button variant="outline" loading={retry.isPending} onClick={() => retry.mutate(c.id)}>Retry</Button>
-              <Button variant="danger" onClick={() => setCancelId({ id: c.id, name: c.name })}>Cancel</Button>
-            </div>
+            {openId === c.id && detail ? (
+              <div className="mt-4 space-y-2 border-t border-ink-600 pt-3 text-sm">
+                <p className="text-mist-400">
+                  Batch {detail.batch?.status ?? "not started"}
+                  {detail.batch?.total_calls_scheduled != null ? ` · ${detail.batch.total_calls_finished ?? 0}/${detail.batch.total_calls_scheduled} finished` : ""}
+                  {detail.batch?.retry_count ? ` · retries ${detail.batch.retry_count}` : ""}
+                </p>
+                {(detail.recipients ?? []).slice(0, 12).map((row) => (
+                  <div key={row.id} className="flex justify-between gap-2 font-mono text-xs">
+                    <span>{row.toNumber}</span>
+                    <span className="text-mist-400">{row.status}{row.errorMessage ? ` · ${row.errorMessage}` : ""}</span>
+                  </div>
+                ))}
+                {(detail.recipients?.length ?? 0) > 12 ? <p className="text-xs text-mist-400">Showing 12 of {detail.recipients?.length} recipients.</p> : null}
+              </div>
+            ) : null}
           </Card>
         ))}
       </QueryPanel>

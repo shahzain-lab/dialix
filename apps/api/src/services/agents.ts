@@ -31,6 +31,7 @@ export function toCartesiaAgent(input: {
   initialMessage?: string | null;
   modelId: string;
   temperature?: number | null;
+  maxOutputTokens?: number | null;
   language: string;
   voiceId: string;
   speed?: string | null;
@@ -40,15 +41,20 @@ export function toCartesiaAgent(input: {
   keyterms: string[];
   transferRules: Array<{ destination: string; type: "phone" | "sip_uri"; condition: string }>;
   toolIds: string[];
+  enableEndCall?: boolean;
+  enableDtmf?: boolean;
+  webhookId?: string | null;
 }): ManagedAgentConfig {
   return {
     name: cartesiaResourceName(input.organizationId, input.name),
+    webhook_id: input.webhookId ?? undefined,
     config: {
       instructions: input.instructions,
       initial_message: input.initialMessage ?? null,
       model: {
         id: input.modelId,
         temperature: input.temperature ?? null,
+        max_output_tokens: input.maxOutputTokens ?? null,
       },
       language: { primary: input.language },
       audio: {
@@ -65,8 +71,8 @@ export function toCartesiaAgent(input: {
       },
       tools: input.toolIds.map((id) => ({ id })),
       system_tools: {
-        end_call: { description: null, pre_tool_speech: "force" },
-        send_dtmf: null,
+        end_call: input.enableEndCall === false ? null : { description: null, pre_tool_speech: "force" },
+        send_dtmf: input.enableDtmf ? { description: "Send keypad tones when the caller needs an IVR or extension.", pre_tool_speech: "auto" } : null,
         transfer_to_number: input.transferRules.length
           ? {
               description: null,

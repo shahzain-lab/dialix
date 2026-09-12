@@ -46,7 +46,14 @@ export async function registerCallRoutes(app: FastifyInstance) {
   app.post("/api/v1/calls/outbound", async (req, reply) => {
     const org = await withOrg(req);
     assertWrite(org.role);
-    const body = req.body as { agentId: string; fromNumberId: string; toNumber: string; contactId?: string };
+    const body = req.body as {
+      agentId: string;
+      fromNumberId: string;
+      toNumber: string;
+      contactId?: string;
+      ringingTimeoutSeconds?: number;
+      maxCallDurationMinutes?: number;
+    };
     if (!body.agentId) return reply.code(400).send({ error: "Choose an agent before placing the outbound call." });
     if (!body.fromNumberId) return reply.code(400).send({ error: "Choose a from-number (caller ID) before placing the outbound call." });
     if (!body.toNumber) return reply.code(400).send({ error: "Enter the destination phone number in E.164, for example +14155551234." });
@@ -76,7 +83,8 @@ export async function registerCallRoutes(app: FastifyInstance) {
     const result = await cartesia.createOutboundCall({
       from_number_id: from.cartesiaNumberId,
       agent_id: agent.cartesiaAgentId,
-      max_call_duration_minutes: agent.maxCallDurationMinutes,
+      ringing_timeout_seconds: body.ringingTimeoutSeconds,
+      max_call_duration_minutes: body.maxCallDurationMinutes ?? agent.maxCallDurationMinutes,
       outbound_calls: [
         {
           to_number: to,

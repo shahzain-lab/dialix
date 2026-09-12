@@ -140,6 +140,8 @@ export function OutboundPage() {
   const [fromNumberId, setFromNumberId] = useState("");
   const [toNumber, setToNumber] = useState("");
   const [contactId, setContactId] = useState("");
+  const [ringTimeout, setRingTimeout] = useState("30");
+  const [maxMinutes, setMaxMinutes] = useState("10");
   const { data: agents, isPending: agentsPending } = useQuery({
     queryKey: ["agents", org?.id],
     enabled: Boolean(org),
@@ -167,6 +169,8 @@ export function OutboundPage() {
           fromNumberId,
           toNumber,
           contactId: contactId || undefined,
+          ringingTimeoutSeconds: Number(ringTimeout),
+          maxCallDurationMinutes: Number(maxMinutes),
         }),
       });
     },
@@ -199,6 +203,14 @@ export function OutboundPage() {
           <div>
             <Label>Destination</Label>
             <Input value={toNumber} onChange={(e) => setToNumber(e.target.value)} placeholder="+1…" />
+          </div>
+          <div>
+            <Label>Ring timeout (seconds)</Label>
+            <Input type="number" min={5} max={120} value={ringTimeout} onChange={(e) => setRingTimeout(e.target.value)} />
+          </div>
+          <div>
+            <Label>Max call minutes</Label>
+            <Input type="number" min={1} max={60} value={maxMinutes} onChange={(e) => setMaxMinutes(e.target.value)} />
           </div>
           <div>
             <Label>CRM contact (optional)</Label>

@@ -69,8 +69,48 @@ async function cartesiaFetch<T>(
   return json as T;
 }
 
+async function cartesiaFetchBytes(path: string, init: RequestInit = {}, apiKey = env.CARTESIA_API_KEY): Promise<{ bytes: Buffer; contentType: string }> {
+  if (!apiKey) {
+    throw new CartesiaError("Cartesia is not connected. Add CARTESIA_API_KEY to preview voices or generate speech.", 503);
+  }
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${apiKey}`);
+  headers.set("X-API-Key", apiKey);
+  headers.set("Cartesia-Version", env.CARTESIA_VERSION);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const res = await fetch(`https://api.cartesia.ai${path}`, { ...init, headers });
+  if (!res.ok) {
+    const text = await res.text();
+    let json: unknown = {};
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      json = { raw: text };
+    }
+    throw new CartesiaError(describeCartesiaFailure(res.status, path, json), res.status, json);
+  }
+  return { bytes: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get("content-type") || "audio/wav" };
+}
+
+export type CartesiaVoice = {
+  id: string;
+  name?: string;
+  tagline?: string;
+  description?: string;
+  gender?: string | null;
+  language?: string;
+  accents?: Array<{ accent: string; locale: string; is_native: boolean }>;
+  is_owner?: boolean;
+  access?: string;
+  is_pro?: boolean;
+  preview_file_url?: string | null;
+};
+
+type VoiceListResponse = { data?: CartesiaVoice[]; voices?: CartesiaVoice[]; has_more?: boolean; next_page?: string | null };
+
 export type ManagedAgentConfig = {
   name: string;
+  webhook_id?: string | null;
   config: {
     instructions: string;
     initial_message?: string | null;
@@ -83,6 +123,7 @@ export type ManagedAgentConfig = {
         speed?: number | null;
         volume?: number | null;
         emotion?: string | null;
+        pronunciation_dictionary_id?: string | null;
       };
     };
     tools?: Array<{ id: string }>;
@@ -121,8 +162,33 @@ export const cartesia = {
   listModels(apiKey?: string) {
     return cartesiaFetch<{ models?: unknown[] } | unknown[]>("/v1/agents/models", {}, apiKey);
   },
-  listVoices(apiKey?: string) {
-    return cartesiaFetch<{ data?: unknown[]; voices?: unknown[] }>("/voices", {}, apiKey);
+  listTemplates(apiKey?: string) {
+    return cartesiaFetch<{ templates?: unknown[]; data?: unknown[] } | unknown[]>("/v1/agents/templates", {}, apiKey);
+  },
+  listVoices(apiKey?: string, query?: Record<string, string | number | boolean | undefined>) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value === undefined || value === "") continue;
+      params.set(key, String(value));
+    }
+    if (!params.has("limit")) params.set("limit", "100");
+    if (!params.has("expand[]")) params.append("expand[]", "preview_file_url");
+    const qs = params.toString();
+    return cartesiaFetch<VoiceListResponse>(`/voices${qs ? `?${qs}` : ""}`, {}, apiKey);
+  },
+  getVoice(id: string, apiKey?: string) {
+    return cartesiaFetch<CartesiaVoice>(`/voices/${id}?${new URLSearchParams({ "expand[]": "preview_file_url" })}`, {}, apiKey);
+  },
+  async previewVoiceFile(url: string, apiKey = env.CARTESIA_API_KEY) {
+    if (!apiKey) throw new CartesiaError("Cartesia is not connected.", 503);
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}`, "X-API-Key": apiKey, "Cartesia-Version": env.CARTESIA_VERSION },
+    });
+    if (!res.ok) throw new CartesiaError("Cartesia voice preview could not be downloaded.", res.status);
+    return { bytes: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get("content-type") || "audio/mpeg" };
+  },
+  ttsBytes(body: Record<string, unknown>, apiKey?: string) {
+    return cartesiaFetchBytes("/tts/bytes", { method: "POST", body: JSON.stringify(body) }, apiKey);
   },
   cloneVoice(form: FormData, apiKey?: string) {
     return cartesiaFetch<{ id: string; name?: string }>("/voices/clone", { method: "POST", body: form }, apiKey);
@@ -144,6 +210,12 @@ export const cartesia = {
   },
   createDocument(body: Record<string, unknown>, apiKey?: string) {
     return cartesiaFetch<{ id: string }>("/agents/documents", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, apiKey);
+  },
+  bulkCreateDocuments(body: Record<string, unknown>, apiKey?: string) {
+    return cartesiaFetch<{ documents?: Array<{ id: string }> }>("/agents/documents/bulk", {
       method: "POST",
       body: JSON.stringify(body),
     }, apiKey);
@@ -214,10 +286,16 @@ export const cartesia = {
     return cartesiaFetch(`/agents/calls/${id}`, {}, apiKey);
   },
   createWebhook(url: string, secret: string, apiKey?: string) {
-    return cartesiaFetch<{ id: string; secret?: string }>("/agents/webhooks", {
+    return cartesiaFetch<{ id: string; secret?: string; url?: string }>("/agents/webhooks", {
       method: "POST",
       body: JSON.stringify({ url, secret, display_name: "Dialix" }),
     }, apiKey);
+  },
+  listWebhooks(apiKey?: string) {
+    return cartesiaFetch<{ data?: Array<{ id: string; url: string; display_name?: string | null }> }>("/agents/webhooks?limit=100", {}, apiKey);
+  },
+  listAgents(apiKey?: string) {
+    return cartesiaFetch<{ data?: Array<{ id: string; name?: string }>; agents?: Array<{ id: string }> } | Array<{ id: string }>>("/v1/agents", {}, apiKey);
   },
   createTool(body: Record<string, unknown>, apiKey?: string) {
     return cartesiaFetch<{ id: string }>("/v1/agents/tools", {
