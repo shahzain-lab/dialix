@@ -12,7 +12,7 @@ function oauthState(organizationId: string, provider: string) {
 }
 
 function microsoftOauthBase() {
-  const tenant = env.MICROSOFT_TENANT_ID.trim() || "organizations";
+  const tenant = env.MICROSOFT_TENANT_ID.trim() || "common";
   return `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0`;
 }
 
