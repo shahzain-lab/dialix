@@ -32,6 +32,7 @@ const schema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
   MICROSOFT_CLIENT_ID: z.string().optional().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().optional().default(""),
+  MICROSOFT_TENANT_ID: z.string().optional().default("organizations"),
   HUBSPOT_CLIENT_ID: z.string().optional().default(""),
   HUBSPOT_CLIENT_SECRET: z.string().optional().default(""),
   S3_ENDPOINT: z.string().optional().default(""),

@@ -11,6 +11,11 @@ function oauthState(organizationId: string, provider: string) {
   return Buffer.from(JSON.stringify({ organizationId, provider, t: Date.now() })).toString("base64url");
 }
 
+function microsoftOauthBase() {
+  const tenant = env.MICROSOFT_TENANT_ID.trim() || "organizations";
+  return `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0`;
+}
+
 export async function registerIntegrationRoutes(app: FastifyInstance) {
   app.get("/api/v1/integrations", async (req) => {
     const org = await withOrg(req);
@@ -42,7 +47,7 @@ export async function registerIntegrationRoutes(app: FastifyInstance) {
       if (!env.MICROSOFT_CLIENT_ID) {
         return reply.code(400).send({ error: "Microsoft 365 is not configured. Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET on the API, then retry Connect." });
       }
-      const url = new URL("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
+      const url = new URL(`${microsoftOauthBase()}/authorize`);
       url.searchParams.set("client_id", env.MICROSOFT_CLIENT_ID);
       url.searchParams.set("redirect_uri", redirect);
       url.searchParams.set("response_type", "code");
@@ -84,7 +89,7 @@ export async function registerIntegrationRoutes(app: FastifyInstance) {
       });
       tokens = (await res.json()) as Record<string, unknown>;
     } else if (parsed.provider === "microsoft_365") {
-      const res = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", {
+      const res = await fetch(`${microsoftOauthBase()}/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
