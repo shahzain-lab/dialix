@@ -110,7 +110,7 @@ type VoiceListResponse = { data?: CartesiaVoice[]; voices?: CartesiaVoice[]; has
 
 export type ManagedAgentConfig = {
   name: string;
-  webhook_id?: string | null;
+  event_webhook_id?: string | null;
   config: {
     instructions: string;
     initial_message?: string | null;
@@ -160,7 +160,7 @@ export const cartesia = {
     return cartesiaFetch(`/v1/agents/${id}`, { method: "DELETE" }, apiKey);
   },
   listModels(apiKey?: string) {
-    return cartesiaFetch<{ models?: unknown[] } | unknown[]>("/v1/agents/models", {}, apiKey);
+    return cartesiaFetch<{ data?: Array<{ id: string; display_name?: string; name?: string; provider?: string }> }>("/v1/agents/models", {}, apiKey);
   },
   listTemplates(apiKey?: string) {
     return cartesiaFetch<{ templates?: unknown[]; data?: unknown[] } | unknown[]>("/v1/agents/templates", {}, apiKey);

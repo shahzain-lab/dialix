@@ -6,6 +6,7 @@ import {
   AGENT_LANGUAGES,
   APPOINTMENT_SETTER_GREETING,
   APPOINTMENT_SETTER_INSTRUCTIONS,
+  DEFAULT_AGENT_MODEL,
   NOISE_SUPPRESSION,
   SUPPORT_GREETING,
   SUPPORT_INSTRUCTIONS,
@@ -152,8 +153,14 @@ export function AgentBuilderPage() {
   const { data: models } = useQuery({
     queryKey: ["agent-models", org?.id],
     enabled: Boolean(org),
-    queryFn: () => api<{ models: Array<{ id: string; name?: string; provider?: string }> }>("/api/v1/agents/models"),
+    queryFn: () => api<{ configured?: boolean; models: Array<{ id: string; name?: string; provider?: string }> }>("/api/v1/agents/models"),
   });
+  const { data: agentOptions } = useQuery({
+    queryKey: ["agent-options", org?.id],
+    enabled: Boolean(org),
+    queryFn: () => api<{ cartesiaConfigured: boolean }>("/api/v1/agents/options"),
+  });
+  const modelOptions = models?.models?.length ? models.models : [{ id: DEFAULT_AGENT_MODEL, name: "Claude Haiku 4.5" }];
 
   const merged = {
     name: form.name ?? existing?.name ?? "",
@@ -161,7 +168,7 @@ export function AgentBuilderPage() {
     template: form.template ?? existing?.template ?? "appointment_setter",
     instructions: form.instructions ?? existing?.instructions ?? "",
     initialMessage: form.initialMessage ?? existing?.initialMessage ?? "",
-    modelId: form.modelId ?? existing?.modelId ?? "gpt-5.4-mini",
+    modelId: form.modelId ?? existing?.modelId ?? DEFAULT_AGENT_MODEL,
     language: form.language ?? existing?.language ?? "en",
     voiceId: form.voiceId ?? existing?.voiceId ?? library[0]?.id ?? "",
     speed: form.speed ?? existing?.speed ?? "1",
@@ -179,6 +186,8 @@ export function AgentBuilderPage() {
   const enableEndCall = flags.enableEndCall ?? existing?.enableEndCall ?? true;
   const enableDtmf = flags.enableDtmf ?? existing?.enableDtmf ?? false;
   const selectedVoice = library.find((v) => v.id === merged.voiceId);
+  const resolvedModelId = modelOptions.some((model) => model.id === merged.modelId) ? merged.modelId : modelOptions[0]!.id;
+  const cartesiaConfigured = agentOptions?.cartesiaConfigured ?? models?.configured ?? false;
 
   function applyTemplate(template: string) {
     if (template === "appointment_setter") {
@@ -200,6 +209,7 @@ export function AgentBuilderPage() {
         method: isNew ? "POST" : "PATCH",
         body: JSON.stringify({
           ...merged,
+          modelId: resolvedModelId,
           speed: Number(merged.speed),
           volume: Number(merged.volume),
           emotion: merged.emotion || null,
@@ -364,8 +374,8 @@ export function AgentBuilderPage() {
             </div>
             <div>
               <Label>LLM</Label>
-              <Select value={merged.modelId} onChange={(e) => setForm((f) => ({ ...f, modelId: e.target.value }))}>
-                {(models?.models?.length ? models.models : [{ id: "gpt-5.4-mini", name: "GPT-5.4 mini" }]).map((model) => (
+              <Select value={resolvedModelId} onChange={(e) => setForm((f) => ({ ...f, modelId: e.target.value }))}>
+                {modelOptions.map((model) => (
                   <option key={model.id} value={model.id}>{model.name || model.id}</option>
                 ))}
               </Select>
@@ -465,11 +475,17 @@ export function AgentBuilderPage() {
           <div className="space-y-2 text-sm">
             <p><span className="text-mist-400">Name:</span> {merged.name || "—"}</p>
             <p><span className="text-mist-400">Voice:</span> {selectedVoice?.name || merged.voiceId || "—"}</p>
-            <p><span className="text-mist-400">Model:</span> {merged.modelId} · {merged.language}</p>
+            <p><span className="text-mist-400">Model:</span> {resolvedModelId} · {merged.language}</p>
             <p><span className="text-mist-400">Audio:</span> speed {merged.speed}x · volume {merged.volume}x · {merged.emotion || "default emotion"}</p>
             <p><span className="text-mist-400">Knowledge folders:</span> {selectedFolders.length}</p>
             <p><span className="text-mist-400">Transfers:</span> {transferRules.length} · end call {enableEndCall ? "on" : "off"} · DTMF {enableDtmf ? "on" : "off"}</p>
-            {!isNew && existing?.cartesiaAgentId ? <Badge tone="good">Will PATCH Cartesia agent {existing.cartesiaAgentId}</Badge> : <Badge tone="warn">Will create locally; Cartesia sync needs CARTESIA_API_KEY</Badge>}
+            {existing?.cartesiaAgentId ? (
+              <Badge tone="good">Synced to Cartesia {existing.cartesiaAgentId}</Badge>
+            ) : cartesiaConfigured ? (
+              <Badge tone="good">Cartesia is connected — save to create the live agent</Badge>
+            ) : (
+              <Badge tone="warn">Cartesia is not connected on this server</Badge>
+            )}
           </div>
         ) : null}
         <div className="flex flex-wrap gap-2 pt-2">

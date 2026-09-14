@@ -19,7 +19,7 @@ export const agentConfigSchema = z.object({
   description: z.string().max(2000).optional().nullable(),
   instructions: z.string().min(1),
   initialMessage: z.string().max(1000).optional().nullable(),
-  modelId: z.string().min(1).default("gpt-5.4-mini"),
+  modelId: z.string().min(1).default("claude-haiku-4.5"),
   temperature: z.number().min(0).max(1).optional().nullable(),
   maxOutputTokens: z.number().int().min(1).max(4096).optional().nullable(),
   language: z.string().min(2).max(8).default("en"),

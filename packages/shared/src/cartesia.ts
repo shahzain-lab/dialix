@@ -100,6 +100,7 @@ export const CAMPAIGN_REGIONS = [
 ] as const;
 
 export const TTS_PREVIEW_MODELS = ["sonic-3.6", "sonic-latest"] as const;
+export const DEFAULT_AGENT_MODEL = "claude-haiku-4.5";
 
 export function formatFaqDocument(pairs: Array<{ q: string; a: string }>): string {
   return pairs

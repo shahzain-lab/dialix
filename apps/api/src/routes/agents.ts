@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
-import { agentConfigSchema, AGENT_EMOTIONS, AGENT_LANGUAGES, KNOWLEDGE_SOURCES, NOISE_SUPPRESSION } from "@dialix/shared";
+import { agentConfigSchema, AGENT_EMOTIONS, AGENT_LANGUAGES, DEFAULT_AGENT_MODEL, KNOWLEDGE_SOURCES, NOISE_SUPPRESSION } from "@dialix/shared";
 import { agentFolders, agents, kbFolders, organizations } from "@dialix/db";
 import { db } from "../db.js";
 import { audit, assertWrite, withOrg } from "../org.js";
@@ -9,20 +9,50 @@ import { applyTemplate, toCartesiaAgent, toolDefinitions } from "../services/age
 import { ensureCartesiaWebhook } from "../services/webhooks.js";
 import { decryptSecret } from "../crypto.js";
 
+function resolveModelId(modelId: string | null | undefined) {
+  if (!modelId || modelId === "gpt-5.4-mini") return DEFAULT_AGENT_MODEL;
+  return modelId;
+}
+
 async function orgApiKey(organizationId: string) {
   const [org] = await db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1);
   if (org?.cartesiaApiKeyEncrypted) return decryptSecret(org.cartesiaApiKeyEncrypted);
   return undefined;
 }
 
+function unwrapList<T>(res: unknown, keys: string[]): T[] {
+  if (Array.isArray(res)) return res as T[];
+  if (res && typeof res === "object") {
+    for (const key of keys) {
+      const value = (res as Record<string, unknown>)[key];
+      if (Array.isArray(value)) return value as T[];
+    }
+  }
+  return [];
+}
+
 async function ensureTools(organizationId: string, apiKey?: string) {
   if (!cartesia.configured() && !apiKey) return [];
   const ids: string[] = [];
+  let lastError: unknown;
   for (const tool of toolDefinitions(organizationId)) {
-    const created = await cartesia.createTool(tool, apiKey);
-    ids.push(created.id);
+    try {
+      const created = await cartesia.createTool(tool, apiKey);
+      if (created.id) ids.push(created.id);
+    } catch (err) {
+      lastError = err;
+    }
   }
+  if (!ids.length && lastError) throw lastError;
   return ids;
+}
+
+async function provisionCartesiaAgent(input: Parameters<typeof toCartesiaAgent>[0], apiKey?: string) {
+  if (!cartesia.configured() && !apiKey) return { cartesiaAgentId: null as string | null, toolIds: [] as string[] };
+  const toolIds = await ensureTools(input.organizationId, apiKey);
+  const webhookId = await ensureCartesiaWebhook(apiKey).catch(() => null);
+  const created = await cartesia.createAgent(toCartesiaAgent({ ...input, toolIds, webhookId }), apiKey);
+  return { cartesiaAgentId: created.id, toolIds };
 }
 
 async function syncFolderAccess(organizationId: string, agentId: string, cartesiaAgentId: string | null, folderIds: string[], apiKey?: string) {
@@ -48,10 +78,17 @@ export async function registerAgentRoutes(app: FastifyInstance) {
 
   app.get("/api/v1/agents/models", async (req) => {
     await withOrg(req);
-    if (!cartesia.configured()) return { models: [{ id: "gpt-5.4-mini", provider: "openai", name: "GPT-5.4 mini" }] };
+    const configured = cartesia.configured();
+    if (!configured) {
+      return { configured, models: [{ id: DEFAULT_AGENT_MODEL, provider: "anthropic", name: "Claude Haiku 4.5" }] };
+    }
     const res = await cartesia.listModels();
-    const models = Array.isArray(res) ? res : ((res as { models?: unknown[] }).models ?? res);
-    return { models };
+    const models = unwrapList<{ id: string; display_name?: string; name?: string; provider?: string }>(res, ["data", "models"]).map((model) => ({
+      id: model.id,
+      name: model.display_name ?? model.name ?? model.id,
+      provider: model.provider,
+    }));
+    return { configured, models };
   });
 
   app.get("/api/v1/agents/templates", async (req) => {
@@ -66,13 +103,13 @@ export async function registerAgentRoutes(app: FastifyInstance) {
       };
     }
     const res = await cartesia.listTemplates().catch(() => ({ templates: [] }));
-    const templates = Array.isArray(res) ? res : ((res as { templates?: unknown[]; data?: unknown[] }).templates ?? (res as { data?: unknown[] }).data ?? []);
-    return { templates };
+    return { templates: unwrapList(res, ["templates", "data"]) };
   });
 
   app.get("/api/v1/agents/options", async (req) => {
     await withOrg(req);
     return {
+      cartesiaConfigured: cartesia.configured(),
       languages: AGENT_LANGUAGES,
       emotions: AGENT_EMOTIONS,
       noise: NOISE_SUPPRESSION,
@@ -104,7 +141,7 @@ export async function registerAgentRoutes(app: FastifyInstance) {
   app.post("/api/v1/agents", async (req, reply) => {
     const org = await withOrg(req);
     assertWrite(org.role);
-    const parsed = agentConfigSchema.parse(req.body);
+    const parsed = agentConfigSchema.parse({ ...req.body as object, modelId: resolveModelId((req.body as { modelId?: string }).modelId) });
     const templated = applyTemplate(parsed.template, parsed.instructions, parsed.waitForCaller ? null : parsed.initialMessage);
     const apiKey = await orgApiKey(org.organizationId);
     const settings = {
@@ -116,10 +153,8 @@ export async function registerAgentRoutes(app: FastifyInstance) {
     };
     let cartesiaAgentId: string | null = null;
     let toolIds: string[] = [];
-    try {
-      toolIds = await ensureTools(org.organizationId, apiKey);
-      const webhookId = await ensureCartesiaWebhook(apiKey).catch(() => null);
-      const payload = toCartesiaAgent({
+    if (cartesia.configured() || apiKey) {
+      const provisioned = await provisionCartesiaAgent({
         organizationId: org.organizationId,
         name: parsed.name,
         instructions: templated.instructions,
@@ -135,17 +170,12 @@ export async function registerAgentRoutes(app: FastifyInstance) {
         noiseSuppression: parsed.noiseSuppression,
         keyterms: parsed.keyterms,
         transferRules: parsed.transferRules,
-        toolIds,
+        toolIds: [],
         enableEndCall: settings.enableEndCall,
         enableDtmf: settings.enableDtmf,
-        webhookId,
-      });
-      if (cartesia.configured() || apiKey) {
-        const created = await cartesia.createAgent(payload, apiKey);
-        cartesiaAgentId = created.id;
-      }
-    } catch (err) {
-      req.log.warn({ err }, "Cartesia agent create skipped or failed");
+      }, apiKey);
+      cartesiaAgentId = provisioned.cartesiaAgentId;
+      toolIds = provisioned.toolIds;
     }
     const [row] = await db
       .insert(agents)
@@ -197,14 +227,16 @@ export async function registerAgentRoutes(app: FastifyInstance) {
     const merged = {
       ...existing,
       ...parsed,
+      modelId: resolveModelId(parsed.modelId ?? existing.modelId),
       keyterms: parsed.keyterms ?? existing.keyterms,
       transferRules: parsed.transferRules ?? existing.transferRules,
       initialMessage: settings.waitForCaller ? null : (parsed.initialMessage ?? existing.initialMessage),
     };
     const apiKey = await orgApiKey(org.organizationId);
-    if (existing.cartesiaAgentId && (cartesia.configured() || apiKey)) {
-      const webhookId = await ensureCartesiaWebhook(apiKey).catch(() => null);
-      const payload = toCartesiaAgent({
+    let cartesiaAgentId = existing.cartesiaAgentId;
+    let toolIds = existing.cartesiaToolIds ?? [];
+    if (cartesia.configured() || apiKey) {
+      const cartesiaInput = {
         organizationId: org.organizationId,
         name: merged.name,
         instructions: merged.instructions,
@@ -220,12 +252,18 @@ export async function registerAgentRoutes(app: FastifyInstance) {
         noiseSuppression: (merged.noiseSuppression as "off" | "auto" | "max") ?? "auto",
         keyterms: merged.keyterms ?? [],
         transferRules: merged.transferRules ?? [],
-        toolIds: existing.cartesiaToolIds ?? [],
+        toolIds,
         enableEndCall: settings.enableEndCall,
         enableDtmf: settings.enableDtmf,
-        webhookId,
-      });
-      await cartesia.updateAgent(existing.cartesiaAgentId, payload, apiKey).catch((err) => req.log.warn({ err }, "Cartesia update failed"));
+      };
+      if (existing.cartesiaAgentId) {
+        const webhookId = await ensureCartesiaWebhook(apiKey).catch(() => null);
+        await cartesia.updateAgent(existing.cartesiaAgentId, toCartesiaAgent({ ...cartesiaInput, webhookId }), apiKey);
+      } else {
+        const provisioned = await provisionCartesiaAgent(cartesiaInput, apiKey);
+        cartesiaAgentId = provisioned.cartesiaAgentId;
+        toolIds = provisioned.toolIds;
+      }
     }
     const [row] = await db
       .update(agents)
@@ -244,13 +282,15 @@ export async function registerAgentRoutes(app: FastifyInstance) {
         keyterms: merged.keyterms,
         maxCallDurationMinutes: merged.maxCallDurationMinutes,
         transferRules: merged.transferRules,
+        cartesiaAgentId,
+        cartesiaToolIds: toolIds,
         settings,
         updatedAt: new Date(),
       })
       .where(and(eq(agents.id, id), eq(agents.organizationId, org.organizationId)))
       .returning();
     if (parsed.knowledgeFolderIds) {
-      await syncFolderAccess(org.organizationId, id, existing.cartesiaAgentId, parsed.knowledgeFolderIds, apiKey);
+      await syncFolderAccess(org.organizationId, id, cartesiaAgentId, parsed.knowledgeFolderIds, apiKey);
     }
     await audit(org, "update", "agent", id);
     return row;

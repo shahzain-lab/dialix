@@ -47,7 +47,7 @@ export function toCartesiaAgent(input: {
 }): ManagedAgentConfig {
   return {
     name: cartesiaResourceName(input.organizationId, input.name),
-    webhook_id: input.webhookId ?? undefined,
+    event_webhook_id: input.webhookId ?? undefined,
     config: {
       instructions: input.instructions,
       initial_message: input.initialMessage ?? null,
@@ -99,6 +99,8 @@ export function toolDefinitions(organizationId: string) {
       type: "webhook",
       name: "check_availability",
       description: "Look up open appointment slots. Use before offering times.",
+      pre_tool_speech: "auto",
+      execution_mode: "immediate",
       api_schema: {
         url: `${base}/calendar/availability`,
         method: "POST",
@@ -117,6 +119,8 @@ export function toolDefinitions(organizationId: string) {
       type: "webhook",
       name: "book_slot",
       description: "Book a confirmed appointment on the calendar.",
+      pre_tool_speech: "auto",
+      execution_mode: "immediate",
       api_schema: {
         url: `${base}/calendar/book`,
         method: "POST",
@@ -139,6 +143,8 @@ export function toolDefinitions(organizationId: string) {
       type: "webhook",
       name: "cancel_appointment",
       description: "Cancel an existing appointment by id.",
+      pre_tool_speech: "auto",
+      execution_mode: "immediate",
       api_schema: {
         url: `${base}/calendar/cancel`,
         method: "POST",
@@ -153,6 +159,8 @@ export function toolDefinitions(organizationId: string) {
       type: "webhook",
       name: "lookup_contact",
       description: "Look up a CRM contact by phone number.",
+      pre_tool_speech: "auto",
+      execution_mode: "immediate",
       api_schema: {
         url: `${base}/crm/lookup`,
         method: "POST",
@@ -167,6 +175,8 @@ export function toolDefinitions(organizationId: string) {
       type: "webhook",
       name: "upsert_contact",
       description: "Create or update a CRM contact.",
+      pre_tool_speech: "auto",
+      execution_mode: "immediate",
       api_schema: {
         url: `${base}/crm/upsert`,
         method: "POST",
