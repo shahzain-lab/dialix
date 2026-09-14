@@ -50,8 +50,11 @@ async function ensureTools(organizationId: string, apiKey?: string) {
 async function provisionCartesiaAgent(input: Parameters<typeof toCartesiaAgent>[0], apiKey?: string) {
   if (!cartesia.configured() && !apiKey) return { cartesiaAgentId: null as string | null, toolIds: [] as string[] };
   const toolIds = await ensureTools(input.organizationId, apiKey);
+  const created = await cartesia.createAgent(toCartesiaAgent({ ...input, toolIds }), apiKey);
   const webhookId = await ensureCartesiaWebhook(apiKey).catch(() => null);
-  const created = await cartesia.createAgent(toCartesiaAgent({ ...input, toolIds, webhookId }), apiKey);
+  if (created.id && webhookId) {
+    await cartesia.attachCallWebhook(created.id, webhookId, apiKey).catch(() => undefined);
+  }
   return { cartesiaAgentId: created.id, toolIds };
 }
 
@@ -257,8 +260,9 @@ export async function registerAgentRoutes(app: FastifyInstance) {
         enableDtmf: settings.enableDtmf,
       };
       if (existing.cartesiaAgentId) {
+        await cartesia.updateAgent(existing.cartesiaAgentId, toCartesiaAgent(cartesiaInput), apiKey);
         const webhookId = await ensureCartesiaWebhook(apiKey).catch(() => null);
-        await cartesia.updateAgent(existing.cartesiaAgentId, toCartesiaAgent({ ...cartesiaInput, webhookId }), apiKey);
+        if (webhookId) await cartesia.attachCallWebhook(existing.cartesiaAgentId, webhookId, apiKey).catch(() => undefined);
       } else {
         const provisioned = await provisionCartesiaAgent(cartesiaInput, apiKey);
         cartesiaAgentId = provisioned.cartesiaAgentId;

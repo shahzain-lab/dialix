@@ -43,11 +43,9 @@ export function toCartesiaAgent(input: {
   toolIds: string[];
   enableEndCall?: boolean;
   enableDtmf?: boolean;
-  webhookId?: string | null;
 }): ManagedAgentConfig {
   return {
     name: cartesiaResourceName(input.organizationId, input.name),
-    event_webhook_id: input.webhookId ?? undefined,
     config: {
       instructions: input.instructions,
       initial_message: input.initialMessage ?? null,
